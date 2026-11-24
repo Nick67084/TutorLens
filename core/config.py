@@ -29,16 +29,17 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").strip()
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3").strip()
 
 # ---- chunking and retrieval ----------------------------------------------
-CHUNK_MAX_CHARS = 1200       # target size of one chunk
-CHUNK_OVERLAP_CHARS = 150    # a short last paragraph is repeated in the next chunk
-TOP_K = 4                    # how many chunks to retrieve for a question
-MIN_SIMILARITY = 0.35        # below this, we say "not in this PDF" (tune it!)
-SECTION_CONTEXT_CHARS = 6000 # max text sent to the LLM when explaining a section
+CHUNK_MAX_CHARS = 1200
+CHUNK_OVERLAP_CHARS = 150
+TOP_K = 6
+MIN_SIMILARITY = 0.35
+SECTION_CONTEXT_CHARS = 10000
 
 # ---- LLM behaviour -------------------------------------------------------
-TEMP_TEACH = 0.4             # a little creativity for explanations
-TEMP_JSON = 0.1              # low temperature = consistent questions and marks
-LLM_TIMEOUT_SECONDS = 300    # local models can be slow on a laptop
+TEMP_TEACH = 0.3
+TEMP_JSON = 0.1
+LLM_TIMEOUT_SECONDS = 300
+LLM_CONTEXT_WINDOW = 8192
 
 
 def load_prompt(name: str) -> str:

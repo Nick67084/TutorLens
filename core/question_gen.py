@@ -33,22 +33,44 @@ def build_context(chunks: list[dict]) -> str:
     return "\n\n".join(f"[p.{c['page']} | {c['section']}]\n{c['text']}" for c in chunks)
 
 
+
 def clean_questions(
     questions: list[Question], allowed_pages: set[int], allowed_types: set[str], n: int
 ) -> list[Question]:
-    """Remove duplicates and unwanted types, and fix impossible page numbers."""
+    """Remove invalid questions and randomize MCQ answer options."""
+
     fallback_page = min(allowed_pages) if allowed_pages else 1
     seen: set[str] = set()
     result: list[Question] = []
+
     for q in questions:
         key = q.question.strip().lower()
+
         if key in seen or q.type not in allowed_types:
             continue
+
+        # Validate and shuffle MCQ options
+        if q.type == "mcq":
+            if len(q.options) != 4:
+                continue
+
+            if len({opt.strip().lower() for opt in q.options}) != 4:
+                continue
+
+            if q.answer not in q.options:
+                continue
+
+            random.shuffle(q.options)
+
         seen.add(key)
+
         if q.source_page not in allowed_pages:
             q.source_page = fallback_page
+
         result.append(q)
+
     return result[:n]
+
 
 
 def generate_quiz(

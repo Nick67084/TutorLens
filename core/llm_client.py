@@ -65,7 +65,10 @@ def _chat_raw(messages: list[dict], temperature: float | None, schema: dict | No
     response = get_client().chat(
         model=_require_model(),
         messages=messages,
-        options={"temperature": config.TEMP_TEACH if temperature is None else temperature},
+       options={
+    "temperature": config.TEMP_TEACH if temperature is None else temperature,
+    "num_ctx": config.LLM_CONTEXT_WINDOW,
+},
         format=schema,
         stream=False,
     )
