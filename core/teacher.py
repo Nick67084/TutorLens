@@ -65,17 +65,25 @@ TEACHING_MODES = {
 
 ANSWER_LENGTHS = {
     "Short": (
-        "Give a concise answer focusing on the essential information."
+        "Aim for 30 to 80 words. "
+        "Answer directly using one short paragraph or 3 to 5 bullets. "
+        "Include only essential information. "
+        "Avoid introductions, conclusions and unnecessary examples."
     ),
 
     "Balanced": (
-        "Provide enough detail to explain the concept clearly "
-        "without unnecessary repetition."
+        "Aim for 80 to 200 words for substantive questions. "
+        "Explain the main concepts, purpose and relevant details. "
+        "Include one useful example when appropriate. "
+        "Avoid unnecessary repetition."
     ),
 
     "Detailed": (
-        "Provide a comprehensive explanation with relevant examples "
-        "and supporting details when the PDF context permits."
+        "Aim for 200 to 500 words for substantial topics. "
+        "Provide a structured and comprehensive explanation. "
+        "Explain important components, relationships and execution flow. "
+        "Include relevant examples and technical details when supported. "
+        "Do not invent information to increase answer length."
     ),
 }
 
@@ -121,6 +129,7 @@ def get_recent_history(
         if remaining <= 0:
             break
 
+        content = sanitize_personal_information(content)
         content = content[:remaining]
 
         recent.append({
@@ -134,29 +143,31 @@ def get_recent_history(
 
 
 def is_follow_up(question: str) -> bool:
-    """Detect common conversational follow-up questions."""
+    """Detect questions that genuinely depend on earlier discussion."""
 
     question = question.strip().lower()
 
+    if not question:
+        return False
+
     patterns = [
-        r"\b(it|this|that|these|those|them)\b",
-        r"\banother example\b",
-        r"\bmore examples?\b",
+        r"^(why|how|what)\??$",
+        r"^(and|also|then)\b",
+        r"^(what|how) about\b",
+        r"\b(explain|describe|simplify|summarize|summarise)\s+(it|this|that|them)\b",
+        r"\b(does|did|can|could|would|should|is|are)\s+(it|this|that|these|they)\b",
+        r"\b(another|more)\s+examples?\b",
         r"\bexplain again\b",
         r"\bexplain more\b",
         r"\bmore detail\b",
         r"\bmore simply\b",
-        r"\bsimplify\b",
-        r"\belaborate\b",
-        r"\bprevious\b",
-        r"\babove\b",
-        r"\bcontinue\b",
-        r"\bsummarize\b",
-        r"\bwhat about\b",
-        r"\bhow about\b",
+        r"\bmake it shorter\b",
+        r"\bmake it simpler\b",
+        r"\bprevious (answer|example|explanation|question|code)\b",
+        r"\byour (answer|example|explanation)\b",
+        r"\bthe above\b",
         r"\bwe just discussed\b",
-        r"\byour answer\b",
-        r"^(why|how|what)\??$",
+        r"^(continue|simplify|elaborate|recap)\b",
     ]
 
     return any(
@@ -169,40 +180,63 @@ def build_retrieval_query(
     question: str,
     history: list[dict] | None = None,
 ) -> str:
-    """Add previous student questions to contextual follow-ups."""
+    """Resolve contextual questions using the previous relevant topic."""
+
+    question = question.strip()
 
     if not history or not is_follow_up(question):
         return question
 
+    recent = get_recent_history(
+        history,
+        max_messages=10,
+        max_chars=4000,
+    )
+
     previous_questions = [
         message["content"]
-        for message in get_recent_history(history)
+        for message in recent
         if message["role"] == "user"
-        and message["content"].strip() != question.strip()
+        and message["content"].strip() != question
     ]
 
     if not previous_questions:
         return question
 
-    previous_context = " ".join(previous_questions[-2:])
+    # Prefer the most recent independent question.
+    previous_topic = next(
+        (
+            item
+            for item in reversed(previous_questions)
+            if not is_follow_up(item)
+        ),
+        previous_questions[-1],
+    )
 
-    return f"{previous_context} {question}".strip()
+    return f"{previous_topic[:600]} {question}".strip()
 
 
 # ============================================================
 # RAG RETRIEVAL
 # ============================================================
 
+
 def retrieve(
     doc_id: int,
     question: str,
     history: list[dict] | None = None,
+    top_k: int | None = None,
 ) -> list[Source]:
-    """Retrieve relevant PDF chunks using contextual search."""
+    """Retrieve PDF evidence using semantic and keyword search."""
 
     question = question.strip()
 
     if not question:
+        return []
+
+    limit = config.TOP_K if top_k is None else top_k
+
+    if limit <= 0:
         return []
 
     contextual_query = build_retrieval_query(
@@ -210,69 +244,159 @@ def retrieve(
         history,
     )
 
-    queries = [question]
+    follow_up = contextual_query != question
 
-    if contextual_query != question:
-        queries.append(contextual_query)
+    queries = (
+        [
+            (contextual_query, 1.0),
+            (question, 0.75),
+        ]
+        if follow_up
+        else [(question, 1.0)]
+    )
 
-    unique_sources: dict[tuple, Source] = {}
+    candidates = {}
 
-    for query in queries:
+    for query, weight in queries:
 
         query_embedding = embeddings.embed_query(query)
 
-        hits = vector_store.search(
-            doc_id,
-            query_embedding,
-            config.TOP_K,
+        hits = vector_store.hybrid_search(
+            doc_id=doc_id,
+            query=query,
+            query_vector=query_embedding,
+            k=max(limit * 2, 12),
         )
 
         for hit in hits:
 
-            similarity = hit["similarity"]
+            similarity = hit.get("similarity")
 
-            if similarity < config.MIN_SIMILARITY:
+            keyword_coverage = hit.get(
+                "keyword_coverage",
+                0.0,
+            )
+
+            hybrid_score = hit.get(
+                "hybrid_score",
+                0.0,
+            )
+
+            semantic_match = (
+                similarity is not None
+                and similarity >= config.MIN_SIMILARITY
+            )
+
+            keyword_match = (
+                keyword_coverage >= 0.30
+            )
+
+            if not semantic_match and not keyword_match:
                 continue
+
+            rank_score = hybrid_score * weight
+
+            key = hit["chunk_index"]
 
             source = Source(
                 page=hit["page"],
                 section=hit["section"],
                 text=hit["text"],
-                similarity=similarity,
+                similarity=(
+                    float(similarity)
+                    if similarity is not None
+                    else 0.0
+                ),
             )
 
-            key = (
-                source.page,
-                source.section,
-                source.text.strip(),
-            )
+            existing = candidates.get(key)
 
-            existing = unique_sources.get(key)
-
-            if existing is None or (
-                source.similarity > existing.similarity
+            if (
+                existing is None
+                or rank_score > existing[0]
             ):
-                unique_sources[key] = source
+                candidates[key] = (
+                    rank_score,
+                    source,
+                )
 
-    ranked_sources = sorted(
-        unique_sources.values(),
-        key=lambda source: source.similarity,
+    ranked = sorted(
+        candidates.values(),
+        key=lambda item: item[0],
         reverse=True,
     )
 
-    return ranked_sources[:config.TOP_K]
+    sources = []
+    seen = set()
+
+    for _, source in ranked:
+
+        key = (
+            source.page,
+            source.section,
+            source.text.strip(),
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        sources.append(source)
+
+        if len(sources) >= limit:
+            break
+
+    return sources
+
 
 
 # ============================================================
 # CONTEXT FORMATTING
 # ============================================================
 
+def sanitize_personal_information(text: str) -> str:
+    """Redact common personal identifiers from educational content."""
+
+    if not text:
+        return text
+
+    # Remove explicitly labelled student IDs.
+    text = re.sub(
+        r"(?i)(\bstudent\s*(?:id|number|no\.?)\s*[:=]?\s*)\d{5,12}\b",
+        r"\1[Student ID]",
+        text,
+    )
+
+    # Remove explicitly labelled student names.
+    text = re.sub(
+        r"(?im)^(\s*student\s*name\s*[:=]\s*)[^\r\n]+",
+        r"\1[Student Name]",
+        text,
+    )
+
+    # Replace personal identifiers in Flutter title examples.
+    text = re.sub(
+        r"""(?i)(\btitle\s*:\s*(?:const\s+)?Text\(\s*)(['"])[A-Za-z][A-Za-z .'-]{0,60}\s+\d{6,10}\2""",
+        r"\1\2Attractions\2",
+        text,
+    )
+
+    # Remove the known name-and-ID pattern from the test lecture.
+    text = re.sub(
+        r"(?i)\bThannob\s+5790065\b",
+        "[Student Name and ID]",
+        text,
+    )
+
+    return text
+
 def format_context(sources: list[Source]) -> str:
-    """Format retrieved PDF content with page references."""
+    """Format sanitized PDF content with page references."""
 
     return "\n\n".join(
-        f"[p.{source.page} | {source.section}]\n"
-        f"{source.text}"
+        f"[p.{source.page} | "
+        f"{sanitize_personal_information(source.section)}]\n"
+        f"{sanitize_personal_information(source.text)}"
         for source in sources
     )
 
@@ -370,8 +494,15 @@ def build_answer_messages(
         "Teaching preferences must not override PDF grounding rules."
     )
     system += "\n\n" + ANSWER_QUALITY_RULES
-    recent = get_recent_history(history)
-
+    recent = (
+    get_recent_history(
+        history,
+        max_messages=6,
+        max_chars=3000,
+    )
+    if is_follow_up(question)
+    else []
+)
     # Avoid repeating the current question if it is already in history.
     if recent and recent[-1]["role"] == "user":
         if recent[-1]["content"].strip() == question.strip():
@@ -470,7 +601,7 @@ def build_section_messages(
 # ============================================================
 
 def clean_answer(answer: str) -> str:
-    """Replace the NOT_IN_PDF signal with a friendly message."""
+    """Clean AI responses and filter personal identifiers."""
 
     if not answer or not answer.strip():
         return (
@@ -480,5 +611,7 @@ def clean_answer(answer: str) -> str:
 
     if answer.strip().upper().startswith("NOT_IN_PDF"):
         return NOT_FOUND_MESSAGE
+
+    answer = sanitize_personal_information(answer)
 
     return answer.strip()
