@@ -38,8 +38,17 @@ SECTION_CONTEXT_CHARS = 10000
 # ---- LLM behaviour -------------------------------------------------------
 TEMP_TEACH = 0.3
 TEMP_JSON = 0.1
+
 LLM_TIMEOUT_SECONDS = 300
 LLM_CONTEXT_WINDOW = 8192
+
+# Keep the Ollama model loaded between requests.
+LLM_KEEP_ALIVE = "15m"
+
+# Response generation limits.
+LLM_MAX_TOKENS_SHORT = 256
+LLM_MAX_TOKENS_BALANCED = 768
+LLM_MAX_TOKENS_DETAILED = 2048
 
 
 def load_prompt(name: str) -> str:
