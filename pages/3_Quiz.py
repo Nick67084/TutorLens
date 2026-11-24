@@ -10,22 +10,33 @@ ui.init()
 student_id = ui.sidebar_student()
 doc = ui.sidebar_document()
 
-st.title("📝 Quiz")
+st.markdown("""
+<div class="tl-hero">
+<div class="tl-eyebrow">TUTORLENS · SMART QUIZ</div>
+<div class="tl-hero-title">Test your <span class="tl-hero-accent">knowledge.</span></div>
+<div class="tl-hero-description">Practice with AI-generated questions from your private course materials and receive personalized feedback.</div>
+</div>
+""", unsafe_allow_html=True)
 
 if doc is None:
     st.info("No PDF yet. Go to the **Upload** page first.")
     st.stop()
 if student_id is None:
-    st.warning("Type your name in the sidebar so your marks can be saved.")
+    st.warning("Please sign in to save your marks.")
     st.stop()
 
-ok, message = llm_client.check_ollama()
-if not ok:
-    st.error(message)
+try:
+    queries.verify_document_owner(doc["id"], student_id)
+except PermissionError:
+    st.error("Document unavailable.")
     st.stop()
+
+c1, c2 = st.columns(2)
+c1.metric("Selected course", doc["title"])
+c2.metric("Completed quizzes", len(queries.get_quiz_summary(student_id)))
 
 quiz = st.session_state.get("quiz")
-if quiz and quiz["doc_id"] != doc["id"]:
+if quiz and (quiz["doc_id"] != doc["id"] or quiz.get("student_id") != student_id):
     quiz = None  # the student switched to another PDF
     st.session_state.pop("quiz", None)
 
@@ -44,18 +55,23 @@ if quiz is None:
         format_func={"mcq": "Multiple choice", "short": "Short answer", "exercise": "Exercise"}.get,
     )
     if st.button("Generate quiz", type="primary", disabled=not types):
+        ok, message = llm_client.check_ollama()
+        if not ok:
+            st.error(message)
+            st.stop()
         with st.spinner("The teacher is writing your questions... (a local model can take a minute)"):
             try:
                 questions = question_gen.generate_quiz(
                     doc["id"], n=n, difficulty=difficulty, types=types,
                     section=None if section == "Whole PDF" else section,
                 )
-                quiz_no = queries.next_quiz_no(doc["id"])
-                ids = queries.save_questions(doc["id"], quiz_no, questions)
+                quiz_no = queries.next_quiz_no(doc["id"], student_id)
+                ids = queries.save_questions(doc["id"], quiz_no, questions, student_id)
             except Exception as error:
                 st.error(f"Could not generate the quiz: {error}")
                 st.stop()
         st.session_state["quiz"] = {
+            "student_id": student_id,
             "doc_id": doc["id"],
             "quiz_no": quiz_no,
             "items": list(zip(ids, [q.model_dump() for q in questions])),
@@ -82,13 +98,15 @@ if quiz["results"] is None:
 
     if submitted:
         results = []
+        pending = []
         with st.spinner("Marking your answers..."):
             try:
                 for qid, q in items:
                     answer = st.session_state.get(f"answer_{qid}")
                     grade = grader.grade(q, answer)
-                    queries.save_attempt(student_id, qid, answer, grade)
+                    pending.append((qid, answer, grade))
                     results.append({"answer": answer, "grade": grade.model_dump()})
+                queries.save_quiz_attempts(student_id, pending)
             except Exception as error:
                 st.error(f"Marking failed: {error}")
                 st.stop()
@@ -101,6 +119,9 @@ total = sum(r["grade"]["points"] for r in quiz["results"])
 maximum = sum(r["grade"]["max_points"] for r in quiz["results"])
 st.subheader(f"Quiz {quiz['quiz_no']} result")
 st.metric("Your score", f"{total} / {maximum}", f"{(100 * total / maximum) if maximum else 0:.0f}%", delta_color="off")
+
+st.progress(min(1.0, max(0.0, total / maximum)) if maximum else 0.0)
+st.success("Your quiz results have been saved to your account.")
 
 for number, ((qid, q), result) in enumerate(zip(items, quiz["results"]), start=1):
     grade = result["grade"]
@@ -115,3 +136,5 @@ for number, ((qid, q), result) in enumerate(zip(items, quiz["results"]), start=1
 if st.button("Start a new quiz", type="primary"):
     st.session_state.pop("quiz", None)
     st.rerun()
+if st.button("View my performance"):
+    st.switch_page("pages/4_Marks.py")

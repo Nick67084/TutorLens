@@ -80,16 +80,29 @@ def chat(messages: list[dict], temperature: float | None = None) -> str:
     return _chat_raw(messages, temperature, None)
 
 
-def stream_chat(messages: list[dict], temperature: float | None = None) -> Iterator[str]:
-    """Yield the answer piece by piece (for a typing effect in Streamlit)."""
+def stream_chat(
+    messages: list[dict],
+    temperature: float | None = None,
+) -> Iterator[str]:
+    """Yield the answer piece by piece for Streamlit."""
+
     stream = get_client().chat(
         model=_require_model(),
         messages=messages,
-        options={"temperature": config.TEMP_TEACH if temperature is None else temperature},
+        options={
+            "temperature": (
+                config.TEMP_TEACH
+                if temperature is None
+                else temperature
+            ),
+            "num_ctx": config.LLM_CONTEXT_WINDOW,
+        },
         stream=True,
     )
+
     for part in stream:
         piece = part["message"]["content"]
+
         if piece:
             yield piece
 

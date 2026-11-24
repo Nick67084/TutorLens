@@ -37,7 +37,7 @@ def apply_theme() -> None:
 
         .block-container {
             max-width: 1400px;
-            padding-top: 3rem;
+            padding-top: 5rem;
             padding-bottom: 3rem;
             padding-left: 3rem;
             padding-right: 3rem;
@@ -94,13 +94,21 @@ def apply_theme() -> None:
             color: var(--tl-dark);
         }
 
-        [data-testid="stSidebar"] button {
-            color: var(--tl-dark);
-        }
+        [data-testid="stSidebar"] .stButton > button {
+    background-color: #10746D !important;
+    border: 1px solid #B9DFD9 !important;
+    color: #FFFFFF !important;
+    border-radius: 9px;
+}
 
-        [data-testid="stSidebar"] button p {
-            color: inherit;
-        }
+[data-testid="stSidebar"] .stButton > button * {
+    color: #FFFFFF !important;
+}
+
+[data-testid="stSidebar"] .stButton > button:hover {
+    background-color: #195653 !important;
+    border-color: #FFFFFF !important;
+}
 
         .tl-brand {
             padding: 12px 0 18px 0;
@@ -332,63 +340,293 @@ def apply_theme() -> None:
     )
 
 
+
 def init() -> None:
     """Initialize the database and shared theme."""
     database.init_db()
     apply_theme()
 
 
-def sidebar_student() -> int | None:
-    """Ask for the student's name and return their ID."""
+# ======================================
+# LOGIN AND REGISTRATION
+# ======================================
 
-    st.sidebar.markdown(
+def login_screen():
+
+    from core import auth
+
+    st.markdown(
         """
-        <div class="tl-brand">
-            <div class="tl-brand-name">TutorLens</div>
-            <div class="tl-brand-caption">
-                AI LEARNING WORKSPACE
-            </div>
-        </div>
-        """,
+<div class="tl-hero">
+<div class="tl-eyebrow">YOUR PERSONAL AI LEARNING WORKSPACE</div>
+<div class="tl-hero-title">
+Welcome to <span class="tl-hero-accent">TutorLens.</span>
+</div>
+<div class="tl-hero-description">
+Sign in to access your private course materials,
+AI conversations, quizzes and academic performance.
+</div>
+</div>
+""",
         unsafe_allow_html=True,
     )
 
+    st.write("")
+
+    left, right = st.columns([1, 1], gap="large")
+
+    with left:
+
+        st.markdown("## Your learning journey")
+
+        st.markdown(
+            """
+            TutorLens provides a personalized learning
+            experience powered by artificial intelligence.
+
+            **Your personal workspace includes:**
+
+            - Private course PDF library
+            - Personalized AI tutoring
+            - Saved conversation history
+            - AI-generated quizzes
+            - Individual marks and feedback
+            """
+        )
+
+        st.info(
+            "Your learning records are linked "
+            "to your individual student account."
+        )
+
+    with right:
+
+        login, signup = st.tabs(
+            ["Sign in", "Create account"]
+        )
+
+        # ======================================
+        # SIGN IN
+        # ======================================
+
+        with login:
+
+            st.markdown("### Welcome back")
+
+            st.caption(
+                "Sign in to your personal workspace."
+            )
+
+            with st.form(
+                "login",
+                clear_on_submit=True,
+            ):
+
+                login_id = st.text_input(
+                    "Student ID",
+                    placeholder="Enter your student ID",
+                    key="login_id",
+                )
+
+                password = st.text_input(
+                    "Password",
+                    type="password",
+                    placeholder="Enter your password",
+                    key="login_password",
+                )
+
+                submitted = st.form_submit_button(
+                    "Sign in",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+                if submitted:
+
+                    account = auth.authenticate(
+                        login_id,
+                        password,
+                    )
+
+                    if account:
+
+                        st.session_state.clear()
+
+                        st.session_state["account"] = (
+                            account
+                        )
+
+                        st.session_state["student_name"] = (
+                            account["name"]
+                        )
+
+                        st.rerun()
+
+                    else:
+
+                        st.error(
+                            "Invalid student ID or password."
+                        )
+
+        # ======================================
+        # CREATE ACCOUNT
+        # ======================================
+
+        with signup:
+
+            st.markdown("### Create your account")
+
+            st.caption(
+                "Start your personalized learning journey."
+            )
+
+            with st.form(
+                "register",
+                clear_on_submit=True,
+            ):
+
+                name = st.text_input(
+                    "Full name",
+                    placeholder="Enter your full name",
+                    key="register_name",
+                )
+
+                login_id = st.text_input(
+                    "Student ID",
+                    placeholder="Enter your student ID",
+                    key="register_id",
+                )
+
+                password = st.text_input(
+                    "Password",
+                    type="password",
+                    placeholder="At least 8 characters",
+                    key="register_password",
+                )
+
+                confirm = st.text_input(
+                    "Confirm password",
+                    type="password",
+                    placeholder="Re-enter your password",
+                    key="register_confirm",
+                )
+
+                submitted = st.form_submit_button(
+                    "Create account",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+                if submitted:
+
+                    try:
+
+                        if password != confirm:
+                            raise ValueError(
+                                "Passwords do not match."
+                            )
+
+                        auth.register(
+                            name,
+                            login_id,
+                            password,
+                        )
+
+                        st.success(
+                            "Account created successfully! "
+                            "Please switch to Sign in."
+                        )
+
+                    except ValueError as error:
+
+                        st.error(str(error))
+
+    st.divider()
+
+    st.markdown(
+        """
+<div class="tl-footer">
+<strong>TutorLens</strong><br>
+Private and Personalized AI Learning Workspace
+<br><br>
+Learn. Practice. Improve.
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+# ======================================
+# AUTHENTICATED STUDENT PROFILE
+# ======================================
+
+def sidebar_student() -> int:
+
+    account = st.session_state.get("account")
+
+    if not account:
+
+        st.switch_page("main.py")
+        st.stop()
+
+    st.sidebar.title("TutorLens")
+
     st.sidebar.markdown("### Student profile")
 
-    name = st.sidebar.text_input(
-        "Your name",
-        value=st.session_state.get("student_name", ""),
-        placeholder="Enter your name",
-    ).strip()
+    st.sidebar.write(account["name"])
 
-    st.session_state["student_name"] = name
+    st.sidebar.caption(
+        "Student ID: " + account["login_id"]
+    )
 
-    if not name:
-        st.sidebar.caption(
-            "Enter your name to save your learning progress."
-        )
-        return None
+    st.sidebar.success("Signed in")
 
-    student_id = queries.get_or_create_student(name)
+    if st.sidebar.button(
+        "Log out",
+        use_container_width=True,
+    ):
 
-    st.sidebar.success("Student profile active")
+        st.session_state.clear()
 
-    return student_id
+        st.switch_page("main.py")
 
+    return account["id"]
+
+
+# ======================================
+# PRIVATE COURSE MATERIAL SELECTOR
+# ======================================
 
 def sidebar_document() -> dict | None:
-    """Let the student choose an uploaded course PDF."""
 
-    documents = queries.list_documents()
+    account = st.session_state.get("account")
+
+    if not account:
+
+        st.switch_page("main.py")
+        st.stop()
+
+    documents = queries.list_documents(
+        account["id"]
+    )
 
     if not documents:
-        st.sidebar.info("No course materials uploaded yet.")
+
+        st.sidebar.info(
+            "No course materials uploaded yet."
+        )
+
         return None
 
     ids = [d["id"] for d in documents]
-    by_id = {d["id"]: d for d in documents}
+
+    by_id = {
+        d["id"]: d
+        for d in documents
+    }
 
     saved = st.session_state.get("doc_id")
+
     index = ids.index(saved) if saved in ids else 0
 
     st.sidebar.markdown("### Course material")
@@ -408,13 +646,20 @@ def sidebar_document() -> dict | None:
     return by_id[chosen]
 
 
+# ======================================
+# PDF SOURCE REFERENCES
+# ======================================
+
 def format_sources(sources) -> str:
-    """Format retrieved PDF page references."""
 
     seen: dict[int, str] = {}
 
     for source in sources:
-        seen.setdefault(source.page, source.section)
+
+        seen.setdefault(
+            source.page,
+            source.section,
+        )
 
     parts = [
         f"p.{page} ({section[:40]})"

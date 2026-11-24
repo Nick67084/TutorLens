@@ -21,6 +21,12 @@ st.set_page_config(
 )
 
 ui.init()
+
+# Require authentication before accessing the workspace
+if not st.session_state.get("account"):
+    ui.login_screen()
+    st.stop()
+
 student_id = ui.sidebar_student()
 
 
@@ -30,7 +36,7 @@ student_id = ui.sidebar_student()
 
 ok, message = llm_client.check_ollama()
 
-documents = queries.list_documents()
+documents = queries.list_documents(student_id)
 
 with st.sidebar:
     st.divider()
@@ -124,34 +130,67 @@ with action2:
 
 st.markdown("## Your workspace")
 
-student_name = st.session_state.get("student_name", "")
+account = st.session_state["account"]
 
-if student_name:
-    st.write(f"Welcome back, {student_name}!")
-else:
-    st.write(
-        "Your personal learning journey starts here."
-    )
+student_name = account["name"]
 
-col1, col2, col3 = st.columns(3)
+st.write(f"Welcome back, {student_name}!")
+
+st.caption(
+    f"Student ID: {account['login_id']} "
+    "· Personal learning workspace"
+)
+
+quiz_history = queries.get_quiz_summary(student_id)
+
+total_points = sum(
+    quiz["points"]
+    for quiz in quiz_history
+)
+
+total_max_points = sum(
+    quiz["max_points"]
+    for quiz in quiz_history
+)
+
+overall_score = (
+    total_points / total_max_points * 100
+    if total_max_points > 0
+    else 0
+)
+
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
+
     st.metric(
-        "Course materials",
+        "My course materials",
         len(documents),
     )
 
 with col2:
+
+    st.metric(
+        "Completed quizzes",
+        len(quiz_history),
+    )
+
+with col3:
+
+    st.metric(
+        "Overall score",
+        f"{overall_score:.1f}%"
+        if total_max_points > 0
+        else "—",
+    )
+
+with col4:
+
     st.metric(
         "AI tutor",
         "Online" if ok else "Offline",
     )
 
-with col3:
-    st.metric(
-        "Learning mode",
-        "PDF + AI",
-    )
 
 if not ok:
     st.warning(message)
